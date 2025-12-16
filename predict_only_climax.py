@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
-import argparse, sys, numpy as np, torch
+
+# example (activate climaX env)
+# python predict_only_climax.py --ckpt /mnt/data/sonia/climax/1.40625deg.ckpt --res 1.40625 
+#   --prompt_dir /mnt/data/sonia/climax-data/natlantic-windmaguv-fullcontext/val 
+#   --batch 2 --out_path out/natlantic-windmaguv-fullcontext
+
+import argparse, sys, numpy as np, torch, os
 from typing import List
+from torch.utils.data import DataLoader, TensorDataset
+from tqdm import tqdm
 
 # Regional architecture (nn.Module, not Lightning)
 from climax.regional_forecast.arch import RegionalClimaX
@@ -22,16 +30,20 @@ DEFAULT_VARS = [
     "specific_humidity_50","specific_humidity_250","specific_humidity_500","specific_humidity_600",
     "specific_humidity_700","specific_humidity_850","specific_humidity_925",
 ]
-DEFAULT_OUT_VARS = ["geopotential_500","temperature_850","2m_temperature"]
+DEFAULT_USE_VARS = ["10m_u_component_of_wind","10m_v_component_of_wind"]
 
 def parse_args():
     p = argparse.ArgumentParser(description="ClimaX predict-only (capture preds via metric)")
     p.add_argument("--ckpt", required=True)
-    p.add_argument("--res", choices=["5.625","1.40625"], default="5.625",
+    p.add_argument("--res", choices=["5.625","1.40625"], 
                    help="Picks img_size & patch_size to match ckpt")
-    p.add_argument("--device", choices=["mps","cpu"], default="cpu")
+    p.add_argument("--prompt_dir", help='path to directory with prompt .npy files')
+    p.add_argument("--device", choices=["cuda","cpu"], default="cpu")
     p.add_argument("--batch", type=int, default=1)
-    p.add_argument("--out_vars", nargs="*", default=DEFAULT_OUT_VARS)
+    p.add_argument("--use_vars", nargs="*", default=DEFAULT_USE_VARS)
+    p.add_argument("--time_step", type=int, default=6, help="hourly, 6 hourly, etc")
+    p.add_argument("--n_steps", type=int, default=7, help="number of time steps to predict")
+    p.add_argument("--out_path", default='out')
     # core arch hyperparams (must match ckpt)
     p.add_argument("--embed_dim", type=int, default=1024)
     p.add_argument("--depth", type=int, default=8)
@@ -105,8 +117,19 @@ class CaptureMetric:
 def main():
     args = parse_args()
 
-    device = torch.device("mps" if (args.device=="mps" and torch.backends.mps.is_available()) else "cpu")
+    device = torch.device("cuda" if (args.device=="cuda" and torch.cuda.is_available()) else "cpu")
     (H, W), patch = geometry_for_resolution(args.res)
+    
+    # load prompts 
+    prompts = []
+    sids = []
+    for fname in os.listdir(args.prompt_dir):
+        prompt = torch.from_numpy(np.load(os.path.join(args.prompt_dir, fname)))
+        prompt = prompt.type(torch.float32)
+        prompts.append(prompt)
+        sids.append(fname.split('.')[0])
+    dataset = TensorDataset(torch.stack(prompts))
+    dataloader = DataLoader(dataset, batch_size=args.batch, shuffle=False)
 
     # Build model
     model = RegionalClimaX(
@@ -117,33 +140,49 @@ def main():
 
     # Load weights (non-strict is fine if heads differ)
     sd = load_checkpoint(args.ckpt)
+    sd = {k.replace("channel_embed", "var_embed"): v for k, v in sd.items()}
+    sd = {k.replace("channel_query", "var_query"): v for k, v in sd.items()}
+    sd = {k.replace("channel_agg", "var_agg"): v for k, v in sd.items()}
     missing, unexpected = model.load_state_dict(sd, strict=False)
     print(f"loaded state_dict | missing: {len(missing)} unexpected: {len(unexpected)}")
 
     # Dummy inputs (predict-only)
     B = args.batch
-    x   = torch.randn(B, len(DEFAULT_VARS), H, W, dtype=torch.float32, device=device)
-    y   = torch.zeros(B, len(args.out_vars), H, W, dtype=torch.float32, device=device)  # dummy target
+    x   = torch.randn(B, len(args.use_vars), H, W, dtype=torch.float32, device=device)
+    y   = torch.zeros(B, len(args.use_vars), H, W, dtype=torch.float32, device=device)  # dummy target
     lat = torch.linspace(-90.0, 90.0, steps=H, dtype=torch.float32, device=device)
-    lead_times = torch.tensor([1], dtype=torch.float32, device=device)  # float avoids MPS Linear issues
+    # predict 6 hours ahead
+    lead_times = torch.tensor([args.time_step], dtype=torch.float32, device=device)  # float avoids MPS Linear issues
     region_info = build_region_info(H, W, patch)
+    
+    os.makedirs(args.out_path, exist_ok=True)
 
     metric = CaptureMetric()
 
     model.to(device).eval()
+    results = []
     with torch.no_grad():
-        # Many RegionalClimaX versions accept region_info at the end of forward(...).
-        # Signature we satisfy: (x, y, lead_times, variables, out_variables, metric, lat, region_info)
-        _ = model(x, y, lead_times, DEFAULT_VARS, args.out_vars, [metric], lat, region_info)
+        for batch in tqdm(dataloader):
+            preds = batch[0].to(device)
+            # if preds.ndim == 3:
+            #     preds = preds.unsqueeze(0) # in case batch=1 and there's no batch dim
+            step_preds = [preds]
+            for _ in range(args.n_steps):
+                # Many RegionalClimaX versions accept region_info at the end of forward(...).
+                # Signature we satisfy: (x, y, lead_times, variables, out_variables, metric, lat, region_info)
+                _ = model(preds, y, lead_times, args.use_vars, args.use_vars, [metric], lat, region_info)
+                preds = metric.last_pred
+                if preds is None:
+                    print("Metric did not receive predictions; your forward signature may differ.", file=sys.stderr)
+                    sys.exit(2)
+                step_preds.append(preds)
+            results.append(torch.stack(step_preds, dim=1).cpu()) # stacks time steps. (B, time, vars, H, W)
+            # print(results[-1].shape)
 
-
-    preds = metric.last_pred
-    if preds is None:
-        print("Metric did not receive predictions; your forward signature may differ.", file=sys.stderr)
-        sys.exit(2)
-
-    print("preds:", tuple(preds.shape))
-    print("OK")
+    results = torch.cat(results, dim=0) # (N, time, vars, H, W)
+    print(results.shape)
+    for i in range(results.shape[0]):
+        np.save(os.path.join(args.out_path, f"{sids[i]}"), results[i].numpy())
 
 if __name__ == "__main__":
     main()
