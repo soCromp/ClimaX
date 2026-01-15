@@ -1,9 +1,8 @@
-#!/usr/bin/env python3
-
+# REMEMBER TO CHANGE THE NAMES OF THE VARS (LINE 33) !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 # example (activate climaX env)
 # python predict_only_climax.py --ckpt /mnt/data/sonia/climax/1.40625deg.ckpt --res 1.40625 
-#   --prompt_dir /mnt/data/sonia/climax-data/natlantic-windmaguv-fullcontext/val 
-#   --batch 2 --out_path out/natlantic-windmaguv-fullcontext
+#   --prompt_dir /mnt/data/sonia/climax-data/input-natlantic-windmag500hpa-fullcontext/val 
+#   --batch 2 --out_path out/natlantic-windmag500hpa-fullcontext/val
 
 import argparse, sys, numpy as np, torch, os
 from typing import List
@@ -38,7 +37,7 @@ def parse_args():
     p.add_argument("--res", choices=["5.625","1.40625"], 
                    help="Picks img_size & patch_size to match ckpt")
     p.add_argument("--prompt_dir", help='path to directory with prompt .npy files')
-    p.add_argument("--device", choices=["cuda","cpu"], default="cpu")
+    p.add_argument("--device", choices=["cuda","cpu"], default="cuda")
     p.add_argument("--batch", type=int, default=1)
     p.add_argument("--use_vars", nargs="*", default=DEFAULT_USE_VARS)
     p.add_argument("--time_step", type=int, default=6, help="hourly, 6 hourly, etc")
