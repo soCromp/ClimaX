@@ -29,7 +29,10 @@ DEFAULT_VARS = [
     "specific_humidity_50","specific_humidity_250","specific_humidity_500","specific_humidity_600",
     "specific_humidity_700","specific_humidity_850","specific_humidity_925",
 ]
-DEFAULT_USE_VARS = ["10m_u_component_of_wind","10m_v_component_of_wind"]
+DEFAULT_USE_VARS = ['2m_temperature', 'geopotential_925',
+    "u_component_of_wind_500","v_component_of_wind_500", 
+                    'temperature_925', 'specific_humidity_500']
+short_names = ['t2m', 'z_925', 'u_500', 'v_500', 't_925', 'q_500']
 
 def parse_args():
     p = argparse.ArgumentParser(description="ClimaX predict-only (capture preds via metric)")
@@ -127,7 +130,21 @@ def main():
         prompt = prompt.type(torch.float32)
         prompts.append(prompt)
         sids.append(fname.split('.')[0])
-    dataset = TensorDataset(torch.stack(prompts))
+    data = torch.stack(prompts) # N V H W
+    print(data.shape, data.mean(axis=(0,2,3)), data.std(axis=(0,2,3)))
+    
+    # normalize
+    mean_file = np.load('normalize_mean.npz')
+    std_file = np.load('normalize_std.npz')
+    mean = torch.tensor([mean_file[var].item() for var in short_names])
+    std = torch.tensor([std_file[var].item() for var in short_names])
+    data = (data - mean[None,:,None,None]) / std[None,:,None,None]
+    print(data.shape, data.mean(axis=(0,2,3)), data.std(axis=(0,2,3)))
+    
+    # Flip H dimension from (90 to -90) -> (-90 to 90) to match ClimaX expected grid
+    data = torch.flip(data, dims=[2])
+    
+    dataset = TensorDataset(data)
     dataloader = DataLoader(dataset, batch_size=args.batch, shuffle=False)
 
     # Build model
@@ -147,7 +164,7 @@ def main():
 
     # Dummy inputs (predict-only)
     B = args.batch
-    x   = torch.randn(B, len(args.use_vars), H, W, dtype=torch.float32, device=device)
+    # x   = torch.randn(B, len(args.use_vars), H, W, dtype=torch.float32, device=device)
     y   = torch.zeros(B, len(args.use_vars), H, W, dtype=torch.float32, device=device)  # dummy target
     lat = torch.linspace(-90.0, 90.0, steps=H, dtype=torch.float32, device=device)
     # predict 6 hours ahead
@@ -179,7 +196,15 @@ def main():
             # print(results[-1].shape)
 
     results = torch.cat(results, dim=0) # (N, time, vars, H, W)
-    print(results.shape)
+    print(results.shape, results.mean(axis=(0,2,3)), results.std(axis=(0,2,3)))
+    
+    # unnormalize
+    results = results * std[None,None,:,None,None] + mean[None,None,:,None,None]
+    print(results.shape, results.mean(axis=(0,2,3)), results.std(axis=(0,2,3)))
+    
+    # Flip back to (90 to -90) for downstream tracking algorithms
+    results = torch.flip(results, dims=[3]) # H is now dim 3
+    
     for i in range(results.shape[0]):
         np.save(os.path.join(args.out_path, f"{sids[i]}"), results[i].numpy())
 
