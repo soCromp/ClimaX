@@ -88,7 +88,7 @@ model:
           "specific_humidity_500",
         ]
       img_size: [128, 256]
-      patch_size: 2
+      patch_size: 4
       embed_dim: 1024
       depth: 8
       decoder_depth: 2
