@@ -24,7 +24,7 @@ lons = np.linspace(0, 360, 256, endpoint=False)
 
 for var_name, (var_path, short_name, level) in variables.items():
     os.makedirs(os.path.join(out_dir, var_name), exist_ok=True)
-    for yr in tqdm(range(1940, 2016)):
+    for yr in tqdm(range(2016, 2025)):
         ds = xr.open_dataset(f'{var_path}.{yr}.nc')
         ds = ds[[short_name]].interp(lat=lats, lon=lons, method="linear")
         if level is not None:
@@ -42,34 +42,34 @@ for var_name, (var_path, short_name, level) in variables.items():
 
 
 # # constants file
-c = cdsapi.Client()
-c.retrieve(
-    'reanalysis-era5-single-levels',
-    {
-        'product_type': 'reanalysis',
-        'variable': [
-            'land_sea_mask',
-            'geopotential', # ERA5 uses surface geopotential to represent orography
-        ],
-        'year': '1940',
-        'month': '01',
-        'day': '01',
-        'time': '00:00',
-        'format': 'netcdf',
-        'grid': '1.40625/1.40625', 
-    },
-    os.path.join(out_dir, 'constants.nc')
-)
+# c = cdsapi.Client()
+# c.retrieve(
+#     'reanalysis-era5-single-levels',
+#     {
+#         'product_type': 'reanalysis',
+#         'variable': [
+#             'land_sea_mask',
+#             'geopotential', # ERA5 uses surface geopotential to represent orography
+#         ],
+#         'year': '1940',
+#         'month': '01',
+#         'day': '01',
+#         'time': '00:00',
+#         'format': 'netcdf',
+#         'grid': '1.40625/1.40625', 
+#     },
+#     os.path.join(out_dir, 'constants.nc')
+# )
 
-ds = xr.open_dataset(os.path.join(out_dir, 'constants.nc')).load()
-ds = ds.squeeze("valid_time").drop_vars("valid_time", errors="ignore")
-ds = ds.rename({
-    "latitude": "lat",
-    "longitude": "lon",
-    "z": "orography"
-})
-lat_1d = ds["lat"].values
-lon_1d = ds["lon"].values
-lat2d_grid = np.repeat(lat_1d[:, np.newaxis], len(lon_1d), axis=1)
-ds["lat2d"] = (("lat", "lon"), lat2d_grid)
-ds.to_netcdf(os.path.join(out_dir, 'constants.nc'))
+# ds = xr.open_dataset(os.path.join(out_dir, 'constants.nc')).load()
+# ds = ds.squeeze("valid_time").drop_vars("valid_time", errors="ignore")
+# ds = ds.rename({
+#     "latitude": "lat",
+#     "longitude": "lon",
+#     "z": "orography"
+# })
+# lat_1d = ds["lat"].values
+# lon_1d = ds["lon"].values
+# lat2d_grid = np.repeat(lat_1d[:, np.newaxis], len(lon_1d), axis=1)
+# ds["lat2d"] = (("lat", "lon"), lat2d_grid)
+# ds.to_netcdf(os.path.join(out_dir, 'constants.nc'))

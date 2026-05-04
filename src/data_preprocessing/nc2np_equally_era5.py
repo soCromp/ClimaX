@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 from climax.utils.data_utils import DEFAULT_PRESSURE_LEVELS, NAME_TO_VAR
 
-HOURS_PER_YEAR = 8760  # 365-day year
+HOURS_PER_YEAR = 1460  # 365-day year 6-HOURLY
 
 
 def nc2np(path, variables, years, save_dir, partition, num_shards_per_year):
@@ -159,7 +159,7 @@ def nc2np(path, variables, years, save_dir, partition, num_shards_per_year):
 @click.option("--start_val_year", type=int, default=2016)
 @click.option("--start_test_year", type=int, default=2017)
 @click.option("--end_year", type=int, default=2019)
-@click.option("--num_shards", type=int, default=8)
+@click.option("--num_shards", type=int, default=10)
 def main(
     root_dir,
     save_dir,
