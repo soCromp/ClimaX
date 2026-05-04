@@ -87,7 +87,7 @@ model:
           "temperature_925",
           "specific_humidity_500",
         ]
-      img_size: [32, 64]
+      img_size: [128, 256]
       patch_size: 2
       embed_dim: 1024
       depth: 8
