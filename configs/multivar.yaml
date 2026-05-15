@@ -2,9 +2,9 @@ seed_everything: 42
 
 # ---------------------------- TRAINER -------------------------------------------
 trainer:
-  default_root_dir: ${oc.env:OUTPUT_DIR,/home/cromp/climaxinf/exps/global_forecast_climax}
+  default_root_dir: ${oc.env:OUTPUT_DIR,/home/sonia/climaxinf/exps/global_forecast_climax}
 
-  precision: 16
+  precision: bf16
 
   gpus: null
   num_nodes: 1
@@ -59,7 +59,7 @@ trainer:
       init_args:
         max_depth: -1
 
-    - class_path: pytorch_lightning.callbacks.RichProgressBar
+    # - class_path: pytorch_lightning.callbacks.RichProgressBar
 
 # ---------------------------- MODEL -------------------------------------------
 model:
@@ -121,6 +121,6 @@ data:
   predict_range: 8
   hrs_each_step: 6
   buffer_size: 10000
-  batch_size: 128
+  batch_size: 8
   num_workers: 1
   pin_memory: False
